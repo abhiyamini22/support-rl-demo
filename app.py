@@ -5,7 +5,6 @@ import uuid
 import random
 import time
 from typing import Dict, Any, Tuple
-from flask import Flask, request, jsonify
 
 # Simple demo for Hugging Face Spaces with OpenEnv endpoints
 class CustomerSupportDemo:
@@ -238,56 +237,37 @@ class CustomerSupportDemo:
                 "satisfaction_score": 0.75
             }
         }
+    
+    def api_reset(self, difficulty: str = "medium"):
+        """API reset endpoint."""
+        result = self.reset(difficulty)
+        return json.dumps(result)
+    
+    def api_step(self, action_json: str):
+        """API step endpoint."""
+        try:
+            action_data = json.loads(action_json)
+            observation, reward, done, info = self.step(action_data)
+            return json.dumps({
+                "observation": observation,
+                "reward": reward,
+                "done": done,
+                "info": info
+            })
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+    
+    def api_state(self):
+        """API state endpoint."""
+        state = self.get_state()
+        return json.dumps(state)
+    
+    def api_health(self):
+        """API health endpoint."""
+        return json.dumps({"status": "healthy", "openenv_available": True})
 
 # Create demo instance
 demo = CustomerSupportDemo()
-
-# Create Flask app for OpenEnv API
-flask_app = Flask(__name__)
-
-@flask_app.route('/reset', methods=['POST'])
-def reset_endpoint():
-    """OpenEnv reset endpoint."""
-    try:
-        data = request.get_json() or {}
-        difficulty = data.get('difficulty', 'medium')
-        result = demo.reset(difficulty)
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@flask_app.route('/step', methods=['POST'])
-def step_endpoint():
-    """OpenEnv step endpoint."""
-    try:
-        action_data = request.get_json()
-        if not action_data:
-            return jsonify({"error": "No action data provided"}), 400
-        
-        observation, reward, done, info = demo.step(action_data)
-        
-        return jsonify({
-            "observation": observation,
-            "reward": reward,
-            "done": done,
-            "info": info
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@flask_app.route('/state', methods=['GET'])
-def state_endpoint():
-    """OpenEnv state endpoint."""
-    try:
-        state = demo.get_state()
-        return jsonify(state)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@flask_app.route('/health', methods=['GET'])
-def health_endpoint():
-    """Health check endpoint."""
-    return jsonify({"status": "healthy", "openenv_available": True})
 
 # Create Gradio interfaces
 def create_simulation_interface():
@@ -401,22 +381,58 @@ This is a real-world environment where AI agents learn to handle customer suppor
         description="Learn about the Customer Support Environment"
     )
 
+# Create API interfaces
+def create_api_interface():
+    """Create API interface for OpenEnv endpoints."""
+    with gr.Blocks() as api_interface:
+        gr.Markdown("# OpenEnv API Endpoints")
+        
+        with gr.Tab("Reset"):
+            difficulty_input = gr.Dropdown(
+                choices=["easy", "medium", "hard"],
+                value="medium",
+                label="Difficulty"
+            )
+            reset_btn = gr.Button("Reset Environment")
+            reset_output = gr.Textbox(label="Reset Response", lines=10)
+            reset_btn.click(demo.api_reset, inputs=difficulty_input, outputs=reset_output)
+        
+        with gr.Tab("Step"):
+            action_input = gr.Textbox(
+                label='Action JSON',
+                placeholder='{"response_type": "escalate"}',
+                lines=3
+            )
+            step_btn = gr.Button("Execute Step")
+            step_output = gr.Textbox(label="Step Response", lines=10)
+            step_btn.click(demo.api_step, inputs=action_input, outputs=step_output)
+        
+        with gr.Tab("State"):
+            state_btn = gr.Button("Get State")
+            state_output = gr.Textbox(label="State Response", lines=10)
+            state_btn.click(demo.api_state, inputs=[], outputs=state_output)
+        
+        with gr.Tab("Health"):
+            health_btn = gr.Button("Health Check")
+            health_output = gr.Textbox(label="Health Response", lines=5)
+            health_btn.click(demo.api_health, inputs=[], outputs=health_output)
+    
+    return api_interface
+
 # Create the main Gradio app
 simulation_demo = create_simulation_interface()
 query_demo = create_query_interface()
 info_demo = create_info_interface()
+api_demo = create_api_interface()
 
 # Launch with tabbed interface
 gradio_app = gr.TabbedInterface(
-    [simulation_demo, query_demo, info_demo],
-    ["Simulation", "Query Test", "Info"],
+    [simulation_demo, query_demo, info_demo, api_demo],
+    ["Simulation", "Query Test", "Info", "API"],
     title="Customer Support Environment"
 )
 
 if __name__ == "__main__":
-    # Mount Flask app to Gradio
-    gradio_app.mount("/flask", flask_app)
-    
     # Launch the app
     gradio_app.launch(
         server_name="0.0.0.0",
