@@ -1,46 +1,14 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import Dict, Any, Optional, List
+from flask import Flask, request, jsonify, render_template_string
 import gradio as gr
 import uuid
 import random
 import time
 import json
+from typing import Dict, Any, List, Optional
 import threading
-from contextlib import asynccontextmanager
 
-# Pydantic models for OpenEnv
-class SupportTicket(BaseModel):
-    ticket_id: str
-    query: str
-    priority: str
-    customer_id: str
-    timestamp: int
-    sentiment: float
-    category: str
-
-class SupportAction(BaseModel):
-    response_type: str
-    response_text: Optional[str] = None
-    escalation_reason: Optional[str] = None
-
-class SupportObservation(BaseModel):
-    ticket: Optional[SupportTicket]
-    success: bool
-    customer_satisfaction: float
-    resolution_time: float
-    feedback: Optional[str] = None
-
-class SupportState(BaseModel):
-    episode_id: str
-    step_count: int = 0
-    total_tickets: int = 0
-    resolved_tickets: int = 0
-    average_satisfaction: float = 0.0
-    current_ticket: Optional[SupportTicket] = None
-    tickets_history: List[SupportTicket] = []
-    performance_metrics: Dict[str, float] = {}
+# Initialize Flask app
+app = Flask(__name__)
 
 # Global environment instance
 env_instance = None
@@ -69,7 +37,7 @@ class CustomerSupportEnv:
         ]
         return base_tickets * 2  # 20 tickets for medium difficulty
     
-    def reset(self, difficulty: str = "medium") -> SupportObservation:
+    def reset(self, difficulty: str = "medium") -> Dict[str, Any]:
         """Reset environment for OpenEnv API."""
         self.episode_id = str(uuid.uuid4())
         self.step_count = 0
@@ -78,48 +46,48 @@ class CustomerSupportEnv:
         
         if self.ticket_pool:
             ticket_data = self.ticket_pool[self.current_ticket_index]
-            self.current_ticket = SupportTicket(
-                ticket_id=f"TK-{uuid.uuid4().hex[:8]}",
-                query=ticket_data["query"],
-                priority=ticket_data["priority"],
-                customer_id="CUST-1234",
-                timestamp=int(time.time()),
-                sentiment=random.uniform(0.2, 0.9),
-                category=ticket_data["category"]
-            )
+            self.current_ticket = {
+                "ticket_id": f"TK-{uuid.uuid4().hex[:8]}",
+                "query": ticket_data["query"],
+                "priority": ticket_data["priority"],
+                "customer_id": "CUST-1234",
+                "timestamp": int(time.time()),
+                "sentiment": random.uniform(0.2, 0.9),
+                "category": ticket_data["category"]
+            }
             
-            return SupportObservation(
-                ticket=self.current_ticket,
-                success=True,
-                customer_satisfaction=0.7,
-                resolution_time=0.0,
-                feedback="Episode started"
-            )
+            return {
+                "ticket": self.current_ticket,
+                "success": True,
+                "customer_satisfaction": 0.7,
+                "resolution_time": 0.0,
+                "feedback": "Episode started"
+            }
         else:
-            return SupportObservation(
-                ticket=None,
-                success=False,
-                customer_satisfaction=0.0,
-                resolution_time=0.0,
-                feedback="No tickets available"
-            )
+            return {
+                "ticket": None,
+                "success": False,
+                "customer_satisfaction": 0.0,
+                "resolution_time": 0.0,
+                "feedback": "No tickets available"
+            }
     
-    def step(self, action: SupportAction) -> tuple[SupportObservation, float, bool, Dict[str, Any]]:
+    def step(self, action_data: Dict[str, Any]) -> tuple[Dict[str, Any], float, bool, Dict[str, Any]]:
         """Execute step for OpenEnv API."""
         if not self.current_ticket or self.current_ticket_index >= len(self.ticket_pool):
             return (
-                SupportObservation(
-                    ticket=None,
-                    success=False,
-                    customer_satisfaction=0.0,
-                    resolution_time=0.0,
-                    feedback="Episode ended"
-                ), 0.0, True, {}
+                {
+                    "ticket": None,
+                    "success": False,
+                    "customer_satisfaction": 0.0,
+                    "resolution_time": 0.0,
+                    "feedback": "Episode ended"
+                }, 0.0, True, {}
             )
         
         ticket = self.current_ticket
-        action_type = action.response_type
-        priority = ticket.priority
+        action_type = action_data.get("response_type", "ask_info")
+        priority = ticket["priority"]
         
         # Calculate reward based on action appropriateness
         if priority == "urgent" and action_type == "escalate":
@@ -139,31 +107,31 @@ class CustomerSupportEnv:
         
         if not done:
             ticket_data = self.ticket_pool[self.current_ticket_index]
-            self.current_ticket = SupportTicket(
-                ticket_id=f"TK-{uuid.uuid4().hex[:8]}",
-                query=ticket_data["query"],
-                priority=ticket_data["priority"],
-                customer_id="CUST-1234",
-                timestamp=int(time.time()),
-                sentiment=random.uniform(0.2, 0.9),
-                category=ticket_data["category"]
-            )
+            self.current_ticket = {
+                "ticket_id": f"TK-{uuid.uuid4().hex[:8]}",
+                "query": ticket_data["query"],
+                "priority": ticket_data["priority"],
+                "customer_id": "CUST-1234",
+                "timestamp": int(time.time()),
+                "sentiment": random.uniform(0.2, 0.9),
+                "category": ticket_data["category"]
+            }
             
-            observation = SupportObservation(
-                ticket=self.current_ticket,
-                success=True,
-                customer_satisfaction=random.uniform(0.6, 0.9),
-                resolution_time=random.uniform(1.0, 10.0),
-                feedback=f"Action {action_type} executed"
-            )
+            observation = {
+                "ticket": self.current_ticket,
+                "success": True,
+                "customer_satisfaction": random.uniform(0.6, 0.9),
+                "resolution_time": random.uniform(1.0, 10.0),
+                "feedback": f"Action {action_type} executed"
+            }
         else:
-            observation = SupportObservation(
-                ticket=None,
-                success=True,
-                customer_satisfaction=0.8,
-                resolution_time=5.0,
-                feedback="Episode completed"
-            )
+            observation = {
+                "ticket": None,
+                "success": True,
+                "customer_satisfaction": 0.8,
+                "resolution_time": 5.0,
+                "feedback": "Episode completed"
+            }
         
         info = {
             "step": self.step_count,
@@ -172,130 +140,109 @@ class CustomerSupportEnv:
         
         return observation, reward, done, info
     
-    def get_state(self) -> SupportState:
+    def get_state(self) -> Dict[str, Any]:
         """Get current state for OpenEnv API."""
         tickets_history = []
         for ticket_data in self.ticket_pool[:self.current_ticket_index]:
-            tickets_history.append(SupportTicket(
-                ticket_id=f"TK-{uuid.uuid4().hex[:8]}",
-                query=ticket_data["query"],
-                priority=ticket_data["priority"],
-                customer_id="CUST-1234",
-                timestamp=int(time.time()),
-                sentiment=random.uniform(0.2, 0.9),
-                category=ticket_data["category"]
-            ))
+            tickets_history.append({
+                "ticket_id": f"TK-{uuid.uuid4().hex[:8]}",
+                "query": ticket_data["query"],
+                "priority": ticket_data["priority"],
+                "customer_id": "CUST-1234",
+                "timestamp": int(time.time()),
+                "sentiment": random.uniform(0.2, 0.9),
+                "category": ticket_data["category"]
+            })
         
-        return SupportState(
-            episode_id=self.episode_id or str(uuid.uuid4()),
-            step_count=self.step_count,
-            total_tickets=len(self.ticket_pool),
-            resolved_tickets=self.current_ticket_index,
-            average_satisfaction=0.75,
-            current_ticket=self.current_ticket,
-            tickets_history=tickets_history,
-            performance_metrics={
+        return {
+            "episode_id": self.episode_id or str(uuid.uuid4()),
+            "step_count": self.step_count,
+            "total_tickets": len(self.ticket_pool),
+            "resolved_tickets": self.current_ticket_index,
+            "average_satisfaction": 0.75,
+            "current_ticket": self.current_ticket,
+            "tickets_history": tickets_history,
+            "performance_metrics": {
                 "avg_resolution_time": 5.0,
                 "escalation_rate": 0.2,
                 "satisfaction_score": 0.75
             }
-        )
+        }
 
-# Initialize FastAPI app
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Initialize environment
+# Initialize environment
+def get_env():
     global env_instance
-    env_instance = CustomerSupportEnv()
-    yield
-    # Cleanup if needed
-
-app = FastAPI(
-    title="Customer Support Environment",
-    description="OpenEnv-compatible customer support environment",
-    version="1.0.0",
-    lifespan=lifespan
-)
-
-# Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+    if env_instance is None:
+        env_instance = CustomerSupportEnv()
+    return env_instance
 
 # OpenEnv API endpoints
-@app.post("/reset")
-async def reset_endpoint(difficulty: str = "medium"):
+@app.route('/reset', methods=['POST'])
+def reset_endpoint():
     """Reset environment endpoint."""
     try:
-        if env_instance is None:
-            env_instance = CustomerSupportEnv()
+        data = request.get_json() or {}
+        difficulty = data.get('difficulty', 'medium')
         
-        observation = env_instance.reset(difficulty)
-        return observation.dict()
+        env = get_env()
+        observation = env.reset(difficulty)
+        
+        return jsonify(observation)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return jsonify({"error": str(e)}), 500
 
-@app.post("/step")
-async def step_endpoint(action: SupportAction):
+@app.route('/step', methods=['POST'])
+def step_endpoint():
     """Step endpoint."""
     try:
-        if env_instance is None:
-            env_instance = CustomerSupportEnv()
+        action_data = request.get_json()
+        if not action_data:
+            return jsonify({"error": "No action data provided"}), 400
         
-        observation, reward, done, info = env_instance.step(action)
+        env = get_env()
+        observation, reward, done, info = env.step(action_data)
         
-        return {
-            "observation": observation.dict(),
+        return jsonify({
+            "observation": observation,
             "reward": reward,
             "done": done,
             "info": info
-        }
+        })
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return jsonify({"error": str(e)}), 500
 
-@app.get("/state")
-async def state_endpoint():
+@app.route('/state', methods=['GET'])
+def state_endpoint():
     """State endpoint."""
     try:
-        if env_instance is None:
-            env_instance = CustomerSupportEnv()
-        
-        state = env_instance.get_state()
-        return state.dict()
+        env = get_env()
+        state = env.get_state()
+        return jsonify(state)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return jsonify({"error": str(e)}), 500
 
-@app.get("/health")
-async def health_endpoint():
+@app.route('/health', methods=['GET'])
+def health_endpoint():
     """Health check endpoint."""
-    return {"status": "healthy", "openenv_available": True}
+    return jsonify({"status": "healthy", "openenv_available": True})
 
 # Gradio interface functions
 def gradio_reset(difficulty: str):
     """Gradio reset function."""
-    if env_instance is None:
-        env_instance = CustomerSupportEnv()
-    
-    observation = env_instance.reset(difficulty)
-    return json.dumps(observation.dict(), indent=2)
+    env = get_env()
+    observation = env.reset(difficulty)
+    return json.dumps(observation, indent=2)
 
 def gradio_step(action_json: str):
     """Gradio step function."""
     try:
-        if env_instance is None:
-            env_instance = CustomerSupportEnv()
-        
+        env = get_env()
         action_data = json.loads(action_json)
-        action = SupportAction(**action_data)
         
-        observation, reward, done, info = env_instance.step(action)
+        observation, reward, done, info = env.step(action_data)
         
         result = {
-            "observation": observation.dict(),
+            "observation": observation,
             "reward": reward,
             "done": done,
             "info": info
@@ -306,11 +253,9 @@ def gradio_step(action_json: str):
 
 def gradio_state():
     """Gradio state function."""
-    if env_instance is None:
-        env_instance = CustomerSupportEnv()
-    
-    state = env_instance.get_state()
-    return json.dumps(state.dict(), indent=2)
+    env = get_env()
+    state = env.get_state()
+    return json.dumps(state, indent=2)
 
 def gradio_health():
     """Gradio health function."""
@@ -370,19 +315,18 @@ def create_gradio_interface():
                 demo_output = gr.Textbox(label="Demo Results", lines=20)
                 
                 def run_demo(difficulty, max_steps):
-                    if env_instance is None:
-                        env_instance = CustomerSupportEnv()
+                    env = get_env()
                     
                     # Reset and run a demo episode
-                    obs = env_instance.reset(difficulty)
-                    results = [f"Episode started with ticket: {obs.ticket.query if obs.ticket else 'None'}"]
+                    obs = env.reset(difficulty)
+                    results = [f"Episode started with ticket: {obs['ticket']['query'] if obs['ticket'] else 'None'}"]
                     
                     for i in range(max_steps):
-                        if env_instance.current_ticket is None:
+                        if env.current_ticket is None:
                             break
                         
                         # Simple action selection
-                        query = env_instance.current_ticket.query.lower()
+                        query = env.current_ticket["query"].lower()
                         if "hacked" in query or "payment" in query:
                             action_type = "escalate"
                         elif "hello" in query or "thank" in query:
@@ -390,8 +334,8 @@ def create_gradio_interface():
                         else:
                             action_type = "ask_info"
                         
-                        action = SupportAction(response_type=action_type)
-                        obs, reward, done, info = env_instance.step(action)
+                        action = {"response_type": action_type}
+                        obs, reward, done, info = env.step(action)
                         
                         results.append(f"Step {i+1}: {action_type} -> reward: {reward:.2f}")
                         
@@ -406,8 +350,26 @@ def create_gradio_interface():
 
 # Mount Gradio app
 gradio_app = create_gradio_interface()
-app = gr.mount_gradio_app(app, gradio_app, path="/")
 
+# Route for Gradio app
+@app.route('/')
+def index():
+    return gradio_app.launch(prevent_thread_lock=False, share=False, server_name="0.0.0.0", server_port=7860, quiet=True)
+
+# Run the app
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=7860)
+    # Start Gradio in a separate thread
+    def run_gradio():
+        gradio_app.launch(
+            server_name="0.0.0.0", 
+            server_port=7860, 
+            share=False, 
+            prevent_thread_lock=True,
+            quiet=True
+        )
+    
+    gradio_thread = threading.Thread(target=run_gradio, daemon=True)
+    gradio_thread.start()
+    
+    # Run Flask app
+    app.run(host="0.0.0.0", port=7860, debug=False)
