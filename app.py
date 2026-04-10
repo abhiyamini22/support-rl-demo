@@ -1,11 +1,36 @@
 import gradio as gr
 import os
-from typing import Dict, Any
+import json
+import uuid
+import random
+import time
+from typing import Dict, Any, Tuple
+from flask import Flask, request, jsonify
 
-# Simple demo for Hugging Face Spaces
+# Simple demo for Hugging Face Spaces with OpenEnv endpoints
 class CustomerSupportDemo:
     def __init__(self):
-        pass
+        self.current_ticket = None
+        self.step_count = 0
+        self.episode_id = None
+        self.ticket_pool = self._generate_tickets()
+        self.current_ticket_index = 0
+        
+    def _generate_tickets(self) -> list:
+        """Generate ticket pool."""
+        base_tickets = [
+            {"query": "payment failed", "priority": "urgent", "category": "payment"},
+            {"query": "hello", "priority": "low", "category": "general"},
+            {"query": "refund status", "priority": "normal", "category": "billing"},
+            {"query": "account hacked", "priority": "urgent", "category": "security"},
+            {"query": "discount?", "priority": "low", "category": "general"},
+            {"query": "system down", "priority": "urgent", "category": "technical"},
+            {"query": "delivery issue", "priority": "normal", "category": "logistics"},
+            {"query": "feature request", "priority": "low", "category": "product"},
+            {"query": "billing question", "priority": "normal", "category": "billing"},
+            {"query": "thank you", "priority": "low", "category": "general"},
+        ]
+        return base_tickets * 2  # 20 tickets for medium difficulty
     
     def smart_action(self, query: str) -> str:
         """Simple rule-based action selection."""
@@ -22,10 +47,6 @@ class CustomerSupportDemo:
     
     def simulate_episode(self, difficulty: str = "medium", max_steps: int = 10) -> Dict[str, Any]:
         """Run a demo episode simulation."""
-        import uuid
-        import time
-        import random
-        
         # Demo ticket scenarios
         demo_tickets = [
             ("payment failed", "urgent"),
@@ -102,9 +123,171 @@ class CustomerSupportDemo:
         explanation = explanations.get(action, "Action selected based on query analysis.")
         
         return f"**Predicted Action:** {action.upper()}\n\n**Reason:** {explanation}"
+    
+    # OpenEnv API Methods
+    def reset(self, difficulty: str = "medium"):
+        """Reset environment for OpenEnv API."""
+        self.episode_id = str(uuid.uuid4())
+        self.step_count = 0
+        self.current_ticket_index = 0
+        self.ticket_pool = self._generate_tickets()
+        
+        if self.ticket_pool:
+            self.current_ticket = self.ticket_pool[self.current_ticket_index]
+            return {
+                "ticket": {
+                    "ticket_id": f"TK-{uuid.uuid4().hex[:8]}",
+                    "query": self.current_ticket["query"],
+                    "priority": self.current_ticket["priority"],
+                    "customer_id": "CUST-1234",
+                    "timestamp": int(time.time()),
+                    "sentiment": random.uniform(0.2, 0.9),
+                    "category": self.current_ticket["category"]
+                },
+                "success": True,
+                "customer_satisfaction": 0.7,
+                "resolution_time": 0.0,
+                "feedback": "Episode started"
+            }
+        else:
+            return {
+                "ticket": None,
+                "success": False,
+                "customer_satisfaction": 0.0,
+                "resolution_time": 0.0,
+                "feedback": "No tickets available"
+            }
+    
+    def step(self, action_data):
+        """Execute step for OpenEnv API."""
+        if not self.current_ticket or self.current_ticket_index >= len(self.ticket_pool):
+            return {
+                "ticket": None,
+                "success": False,
+                "customer_satisfaction": 0.0,
+                "resolution_time": 0.0,
+                "feedback": "Episode ended"
+            }, 0.0, True, {}
+        
+        ticket = self.current_ticket
+        action_type = action_data.get("response_type", "ask_info")
+        priority = ticket["priority"]
+        
+        # Calculate reward based on action appropriateness
+        if priority == "urgent" and action_type == "escalate":
+            reward = 0.9
+        elif priority == "low" and action_type == "auto_reply":
+            reward = 0.8
+        elif priority == "normal" and action_type == "ask_info":
+            reward = 0.7
+        else:
+            reward = 0.3
+        
+        self.step_count += 1
+        self.current_ticket_index += 1
+        
+        # Check if episode is done
+        done = self.current_ticket_index >= len(self.ticket_pool)
+        
+        if not done:
+            self.current_ticket = self.ticket_pool[self.current_ticket_index]
+            observation = {
+                "ticket": {
+                    "ticket_id": f"TK-{uuid.uuid4().hex[:8]}",
+                    "query": self.current_ticket["query"],
+                    "priority": self.current_ticket["priority"],
+                    "customer_id": "CUST-1234",
+                    "timestamp": int(time.time()),
+                    "sentiment": random.uniform(0.2, 0.9),
+                    "category": self.current_ticket["category"]
+                },
+                "success": True,
+                "customer_satisfaction": random.uniform(0.6, 0.9),
+                "resolution_time": random.uniform(1.0, 10.0),
+                "feedback": f"Action {action_type} executed"
+            }
+        else:
+            observation = {
+                "ticket": None,
+                "success": True,
+                "customer_satisfaction": 0.8,
+                "resolution_time": 5.0,
+                "feedback": "Episode completed"
+            }
+        
+        info = {
+            "step": self.step_count,
+            "episode_id": self.episode_id
+        }
+        
+        return observation, reward, done, info
+    
+    def get_state(self):
+        """Get current state for OpenEnv API."""
+        return {
+            "episode_id": self.episode_id or str(uuid.uuid4()),
+            "step_count": self.step_count,
+            "total_tickets": len(self.ticket_pool),
+            "resolved_tickets": self.current_ticket_index,
+            "average_satisfaction": 0.75,
+            "current_ticket": self.current_ticket,
+            "tickets_history": self.ticket_pool[:self.current_ticket_index],
+            "performance_metrics": {
+                "avg_resolution_time": 5.0,
+                "escalation_rate": 0.2,
+                "satisfaction_score": 0.75
+            }
+        }
 
 # Create demo instance
 demo = CustomerSupportDemo()
+
+# Create Flask app for OpenEnv API
+flask_app = Flask(__name__)
+
+@flask_app.route('/reset', methods=['POST'])
+def reset_endpoint():
+    """OpenEnv reset endpoint."""
+    try:
+        data = request.get_json() or {}
+        difficulty = data.get('difficulty', 'medium')
+        result = demo.reset(difficulty)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@flask_app.route('/step', methods=['POST'])
+def step_endpoint():
+    """OpenEnv step endpoint."""
+    try:
+        action_data = request.get_json()
+        if not action_data:
+            return jsonify({"error": "No action data provided"}), 400
+        
+        observation, reward, done, info = demo.step(action_data)
+        
+        return jsonify({
+            "observation": observation,
+            "reward": reward,
+            "done": done,
+            "info": info
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@flask_app.route('/state', methods=['GET'])
+def state_endpoint():
+    """OpenEnv state endpoint."""
+    try:
+        state = demo.get_state()
+        return jsonify(state)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@flask_app.route('/health', methods=['GET'])
+def health_endpoint():
+    """Health check endpoint."""
+    return jsonify({"status": "healthy", "openenv_available": True})
 
 # Create Gradio interfaces
 def create_simulation_interface():
@@ -191,6 +374,12 @@ This is a real-world environment where AI agents learn to handle customer suppor
 - **Escalation Rate**: Resource utilization
 - **Priority Handling**: Correct urgent ticket processing
 
+## OpenEnv API Endpoints
+- **POST /reset** - Reset environment
+- **POST /step** - Execute action
+- **GET /state** - Get current state
+- **GET /health** - Health check
+
 ## Usage
 1. Use the Simulation tab to run full episodes
 2. Use the Query Test tab to test individual queries
@@ -212,21 +401,24 @@ This is a real-world environment where AI agents learn to handle customer suppor
         description="Learn about the Customer Support Environment"
     )
 
-# Create the main app
+# Create the main Gradio app
 simulation_demo = create_simulation_interface()
 query_demo = create_query_interface()
 info_demo = create_info_interface()
 
 # Launch with tabbed interface
-app = gr.TabbedInterface(
+gradio_app = gr.TabbedInterface(
     [simulation_demo, query_demo, info_demo],
     ["Simulation", "Query Test", "Info"],
     title="Customer Support Environment"
 )
 
 if __name__ == "__main__":
+    # Mount Flask app to Gradio
+    gradio_app.mount("/flask", flask_app)
+    
     # Launch the app
-    app.launch(
+    gradio_app.launch(
         server_name="0.0.0.0",
         server_port=7860,
         share=False
